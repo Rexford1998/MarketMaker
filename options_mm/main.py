@@ -1,36 +1,34 @@
 import time
-
-from engine.execution_engine import ExecutionEngine
-from engine.market_data import MarketData
-from engine.quoting_engine import QuotingEngine
-from engine.risk_engine import RiskEngine
-from engine.signal_engine import SignalEngine
-from engine.volatility_surface import VolatilitySurface
+from engine import risk_engine, signals_engine, broker_adapter
 from infrastructure import redis_state
-from infrastructure.broker_adapter import BrokerAdapter
 
-# Initialize
-broker = BrokerAdapter()
-md = MarketData(broker)
-vol = VolatilitySurface()
-signals_engine = SignalEngine(vol)
-quoting = QuotingEngine(broker)
-execution = ExecutionEngine(broker)
-risk = RiskEngine(redis_state)
+# Define your trading symbols
+symbols = ["SPY", "QQQ"]
 
-SYMBOLS = ["SPY", "QQQ"]
+# Initialize engines
+risk = risk_engine.RiskEngine()
+signals = signals_engine.SignalsEngine()
+broker = broker_adapter.DummyBroker()
 
+print("=== Market Making Engine Starting ===", flush=True)
 
+# Main loop
 while True:
-    for symbol in SYMBOLS:
-        chain = md.update(symbol)
-        vol.update_surface(symbol, chain)
-        signals = signals_engine.compute_signal(symbol)
-
+    for symbol in symbols:
+        print(f"[DEBUG] Checking risk for {symbol}", flush=True)
         if risk.check_risk(symbol):
-            orders = quoting.quote(signals)
-            execution.execute_orders(orders)
+            signal = signals.get_signal(symbol)
+            print(f"[DEBUG] Signal for {symbol}: {signal}", flush=True)
+            
+            if signal != "HOLD":
+                print(f"[DEBUG] Sending order for {symbol}: {signal}", flush=True)
+                broker.place_order(symbol, signal)
+                # Update position in Redis
+                redis_state.set_position(symbol, broker.get_position(symbol))
+            else:
+                print(f"[DEBUG] No trade for {symbol}, HOLD signal", flush=True)
         else:
-            print("Halting trading due to risk limits.")
+            print(f"[DEBUG] Risk check failed for {symbol}, skipping trade", flush=True)
 
-    time.sleep(5)
+    # Sleep between loops to prevent busy CPU
+    time.sleep(1)
